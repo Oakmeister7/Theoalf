@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TheoAlf Dash</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap');
+        
+        body {
+            margin: 0;
+            background-color: #0d0d0d;
+            color: #fff;
+            font-family: 'Montserrat', sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            user-select: none;
+        }
+
+        #game-wrapper {
+            position: relative;
+            width: 900px;
+            height: 450px;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+            border: 2px solid #222;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background: #111;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10;
+            text-align: center;
+            backdrop-filter: blur(3px);
+        }
+
+        .hidden { display: none !important; }
+
+        h1 { font-size: 4rem; margin-bottom: 10px; text-shadow: 0 0 15px #fff; letter-spacing: 2px; }
+        
+        .btn {
+            padding: 15px 40px;
+            margin: 15px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: bold;
+            transition: transform 0.1s, box-shadow 0.2s;
+            text-transform: uppercase;
+        }
+
+        #btn-theo { background: #00e5ff; color: #000; box-shadow: 0 0 20px #00e5ff; }
+        #btn-alfred { background: #39ff14; color: #000; box-shadow: 0 0 20px #39ff14; }
+        .btn:active { transform: scale(0.95); }
+
+        #hud {
+            position: absolute;
+            top: 15px; left: 20px; right: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 1.5rem;
+            z-index: 5;
+            text-shadow: 0 0 10px #fff;
+            pointer-events: none;
+        }
+
+        #event-text {
+            position: absolute;
+            top: 40%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 6rem;
+            color: #fff;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+            z-index: 8;
+            text-shadow: 0 0 30px rgba(255, 255, 255, 0.9);
+        }
+
+        #death-msg { font-size: 3rem; color: #ff003c; text-shadow: 0 0 20px #ff003c; margin-bottom: 10px; }
+        .sub-text { font-size: 1.2rem; color: #aaa; margin-top: 20px; }
+        #win-msg { font-size: 4rem; color: #ffd700; text-shadow: 0 0 30px #ffd700; }
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <canvas id="gameCanvas" width="900" height="450"></canvas>
+    
+    <div id="hud">
+        <div id="time-display">Tid: 0.0s</div>
+        <div id="highscore-display">Bästa: 0.0s</div>
+    </div>
+
+    <div id="event-text"></div>
+
+    <div id="start-menu" class="ui-layer">
+        <h1>THEOALF DASH</h1>
+        <div>
+            <button id="btn-theo" class="btn">Spela som Theo</button>
+            <button id="btn-alfred" class="btn">Spela som Alfred</button>
+        </div>
+    </div>
+
+    <div id="game-over-menu" class="ui-layer hidden">
+        <div id="death-msg"></div>
+        <div style="font-size: 2rem;">Överlevde: <span id="final-time"></span>s</div>
+        <div class="sub-text">Tryck på [R] eller Klicka för att starta om</div>
+    </div>
+
+    <div id="win-menu" class="ui-layer hidden">
+        <div id="win-msg">YOU WIN</div>
+        <div style="font-size: 2rem; margin-top: 20px;">Total tid: <span id="win-time"></span>s</div>
+        <button class="btn" style="background:#fff; color:#000; margin-top:30px;" onclick="location.reload()">Huvudmeny</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // UI Elements
+    const startMenu = document.getElementById('start-menu');
+    const gameOverMenu = document.getElementById('game-over-menu');
+    const winMenu = document.getElementById('win-menu');
+    const eventText = document.getElementById('event-text');
+    const timeDisplay = document.getElementById('time-display');
+    const highscoreDisplay = document.getElementById('highscore-display');
+    const deathMsg = document.getElementById('death-msg');
+    const finalTimeSpan = document.getElementById('final-time');
+    const winTimeSpan = document.getElementById('win-time');
+
+    // Game Constants
+    const GRAVITY = 0.8;
+    const JUMP_FORCE = -14;
+    const GROUND_HEIGHT = 50;
+    const WIN_TIME = 600; // 10 minutes in seconds
+    
+    // State
+    let gameState = 'MENU'; // MENU, PLAYING, GAMEOVER, WIN
+    let lastTime = 0;
+    let timer = 0;
+    let highscore = localStorage.getItem('theoAlfDashHighscore') || 0;
+    highscoreDisplay.innerText = `Bästa: ${parseFloat(highscore).toFixed(1)}s`;
+    
+    let event1Triggered = false;
+    let event2Triggered = false;
+
+    // Player Object
+    let player = {
+        x: 100,
+        y: 0,
+        size: 30,
+        vy: 0,
+        color: '#fff',
+        name: '',
+        isGrounded: false
+    };
+
+    let obstacles = [];
+    let spawnTimer = 0;
+    let currentSpeed = 6;
+    let spawnInterval = 100; // frames between spawns
+
+    // Character Selection
+    document.getElementById('btn-theo').addEventListener('click', () => startGame('Theo', '#00e5ff'));
+    document.getElementById('btn-alfred').addEventListener('click', () => startGame('Alfred', '#39ff14'));
+
+    function startGame(name, color) {
+        player.name = name;
+        player.color = color;
+        resetGame();
+        startMenu.classList.add('hidden');
+        gameOverMenu.classList.add('hidden');
+        winMenu.classList.add('hidden');
+        gameState = 'PLAYING';
+        requestAnimationFrame(gameLoop);
+    }
+
+    function resetGame() {
+        player.y = canvas.height - GROUND_HEIGHT - player.size;
+        player.vy = 0;
+        obstacles = [];
+        timer = 0;
+        currentSpeed = 6;
+        spawnTimer = 0;
+        event1Triggered = false;
+        event2Triggered = false;
+        eventText.style.opacity = 0;
+        timeDisplay.innerText = `Tid: 0.0s`;
+        highscoreDisplay.innerText = `Bästa: ${parseFloat(highscore).toFixed(1)}s`;
+    }
+
+    // Input Handling
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && gameState === 'PLAYING') {
+            jump();
+        }
+        if ((e.code === 'KeyR' || e.code === 'Space') && gameState === 'GAMEOVER') {
+            startGame(player.name, player.color);
+        }
+    });
+
+    // Mobile/Click support
+    window.addEventListener('mousedown', () => {
+        if (gameState === 'PLAYING') jump();
+        if (gameState === 'GAMEOVER') startGame(player.name, player.color);
+    });
+
+    function jump() {
+        if (player.isGrounded) {
+            player.vy = JUMP_FORCE;
+            player.isGrounded = false;
+        }
+    }
+
+    function spawnObstacle() {
+        // Difficulty Logic based on timer
+        let isHard = timer > 120;
+        let isMedium = timer > 30 && !isHard;
+
+        let width = 30 + Math.random() * 20;
+        let height = 40 + Math.random() * 30;
+        
+        // Sometimes spawn floating blocks or tighter gaps in medium/hard
+        let yPos = canvas.height - GROUND_HEIGHT - height;
+        
+        if (isMedium && Math.random() > 0.7) {
+            // Floating obstacle that player must run under or jump over precisely
+            yPos -= 50; 
+            height = 30;
+        } else if (isHard && Math.random() > 0.5) {
+            // Taller, tighter obstacles
+            height = 60 + Math.random() * 30;
+            yPos = canvas.height - GROUND_HEIGHT - height;
+            width = 40;
+        }
+
+        obstacles.push({
+            x: canvas.width,
+            y: yPos,
+            w: width,
+            h: height,
+            passed: false
+        });
+    }
+
+    function updatePhysics(dt) {
+        // Apply Gravity
+        player.vy += GRAVITY;
+        player.y += player.vy;
+
+        // Ground Collision
+        const floorY = canvas.height - GROUND_HEIGHT - player.size;
+        if (player.y >= floorY) {
+            player.y = floorY;
+            player.vy = 0;
+            player.isGrounded = true;
+        }
+
+        // Difficulty / Speed scaling
+        if (timer < 30) {
+            currentSpeed = 7;
+            spawnInterval = 80;
+        } else if (timer < 120) {
+            currentSpeed = 9;
+            spawnInterval = 60;
+        } else {
+            currentSpeed = 11 + (timer / 100); // Caps around 15 at end game
+            spawnInterval = 45;
+        }
+
+        // Move Obstacles
+        for (let i = 0; i < obstacles.length; i++) {
+            let obs = obstacles[i];
+            obs.x -= currentSpeed;
+
+            // Strict Hitbox Collision (AABB)
+            // Slightly smaller hitbox for fairness (forgiving by 2 pixels)
+            let margin = 2; 
+            if (player.x + margin < obs.x + obs.w &&
+                player.x + player.size - margin > obs.x &&
+                player.y + margin < obs.y + obs.h &&
+                player.y + player.size - margin > obs.y) {
+                gameOver();
+            }
+        }
+
+        // Remove off-screen obstacles
+        obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
+
+        // Spawn logic
+        spawnTimer++;
+        if (spawnTimer >= spawnInterval) {
+            spawnObstacle();
+            spawnTimer = 0;
+            // Randomize slightly to break patterns
+            spawnTimer -= Math.floor(Math.random() * 15);
+        }
+    }
+
+    function checkEvents() {
+        if (timer >= 10 && !event1Triggered) {
+            triggerEventText("SIIIIIIIIIU");
+            event1Triggered = true;
+        }
+        if (timer >= 30 && !event2Triggered) {
+            triggerEventText("FK MESSI");
+            event2Triggered = true;
+        }
+        if (timer >= WIN_TIME) {
+            winGame();
+        }
+    }
+
+    function triggerEventText(text) {
+        eventText.innerText = text;
+        eventText.style.opacity = 1;
+        setTimeout(() => {
+            eventText.style.opacity = 0;
+        }, 3000);
+    }
+
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        gameOverMenu.classList.remove('hidden');
+        finalTimeSpan.innerText = timer.toFixed(1);
+
+        // Save Highscore
+        if (timer > highscore) {
+            highscore = timer;
+            localStorage.setItem('theoAlfDashHighscore', highscore);
+        }
+
+        // Custom Death Messages
+        if (player.name === 'Alfred') {
+            deathMsg.innerText = "NO WAAAAAAAAY";
+        } else {
+            deathMsg.innerText = "AFFE HAR ALLTID SÅ TUUUUUUUR";
+        }
+    }
+
+    function winGame() {
+        gameState = 'WIN';
+        winMenu.classList.remove('hidden');
+        winTimeSpan.innerText = timer.toFixed(1);
+    }
+
+    function draw() {
+        // Clear
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Ground Line
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height - GROUND_HEIGHT);
+        ctx.lineTo(canvas.width, canvas.height - GROUND_HEIGHT);
+        ctx.strokeStyle = player.color;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = player.color;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Draw Ground Fill
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, GROUND_HEIGHT);
+
+        // Draw Obstacles (Red Neon)
+        ctx.fillStyle = '#ff003c';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ff003c';
+        for (let obs of obstacles) {
+            ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+        }
+
+        // Draw Player (Neon)
+        ctx.fillStyle = player.color;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = player.color;
+        ctx.fillRect(player.x, player.y, player.size, player.size);
+        
+        // Reset Shadow
+        ctx.shadowBlur = 0;
+    }
+
+    function gameLoop(timestamp) {
+        if (gameState !== 'PLAYING') return;
+
+        let dt = (timestamp - lastTime) / 1000;
+        lastTime = timestamp;
+
+        // Add to survive timer
+        timer += dt;
+        timeDisplay.innerText = `Tid: ${timer.toFixed(1)}s`;
+
+        updatePhysics(dt);
+        checkEvents();
+        draw();
+
+        if (gameState === 'PLAYING') {
+            requestAnimationFrame(gameLoop);
+        }
+    }
+</script>
+</body>
+</html>
